@@ -1,0 +1,227 @@
+#include <stdio.h>
+#include "xparameters.h"
+#include "xil_io.h"
+#include "xtime_l.h"  // To measure of processing time
+#include <stdlib.h>    // To generate rand value
+#include <assert.h>
+
+#define DATA_GEN 1
+#define SW_RUN 2
+#define HW_RUN 3
+#define CHECK 4
+
+#define AXI_DATA_BYTE 4
+
+#define IDLE 1
+#define RUN 1 << 1
+#define DONE 1 << 2
+
+#define CTRL_REG 0
+#define STATUS_REG 1
+#define MEM0_ADDR_REG 2
+#define MEM0_DATA_REG 3
+#define MEM1_ADDR_REG 4
+#define MEM1_DATA_REG 5
+
+#define BRAM_BASE_ADDR 0x40000000 // BRAM의 기본 주소 (예제)
+#define BRAM_SIZE 0x10000 // 각 BRAM의 크기
+
+#define MEM_DEPTH 8192
+#define NUM_BLOCK (MATRIX_SIZE / BLOCK_SIZE)*(MATRIX_SIZE / BLOCK_SIZE)
+#define MATRIX_SIZE 128
+#define BLOCK_SIZE 16
+#define BLOCK_CNT (MATRIX_SIZE/BLOCK_SIZE)*(MATRIX_SIZE/BLOCK_SIZE)
+
+#define Q 6 // Q6 형식 사용 (정수 2비트, 소수 6비트)
+
+// 실수를 고정 소수점으로 변환
+#define FLOAT_TO_FIXED(x) ((int)((x) * (1 << Q)))
+
+// 고정 소수점을 실수로 변환
+#define FIXED_TO_FLOAT(x) (((float)(x)) / (1 << Q))
+
+// Fixed-point 곱셈
+#define FIXED_MULT(a, b) (((a) * (b)) >> Q)
+
+// Fixed-point 덧셈
+#define FIXED_ADD(a, b) ((a) + (b))
+
+int main() {
+   int data;
+   int case_num;
+   int read_data;
+   int i, j, k, p, s;
+   XTime tStart, tEnd;
+
+   unsigned int x;
+   unsigned short lower;
+
+   unsigned int *write_buf;
+   write_buf = (unsigned int *) malloc(sizeof(unsigned int) * MEM_DEPTH);
+
+   unsigned int *hw_result_buf;
+   hw_result_buf = (unsigned short *) malloc(sizeof(unsigned short) * MEM_DEPTH);
+   unsigned int *sw_result_buf;
+   sw_result_buf = (unsigned short *) malloc(sizeof(unsigned short) * MEM_DEPTH);
+   unsigned char A[MATRIX_SIZE*MATRIX_SIZE]; // 8b
+   unsigned char B[MATRIX_SIZE*MATRIX_SIZE]; // 8b
+   unsigned short C[MATRIX_SIZE*MATRIX_SIZE]; // 16b 결과 행렬
+
+
+
+
+    while (1) {
+       printf("======= Hello Lab19 Matbi ======\n");
+       printf("plz input run mode\n");
+       printf("1. DATA_GEN \n");
+       printf("2. SW RUN \n");
+       printf("3. HW RUN \n");
+       printf("4. CHECK SW vs HW result\n");
+
+       scanf("%d",&case_num);
+
+       if (case_num == DATA_GEN){
+          for(p = 0; p< MEM_DEPTH; p++){
+        	  write_buf[p] = 0;
+          // init
+         //  for (int i = 0; i < NUM_BLOCK; i++) {
+         //      for (int j = 0; j < BLOCK_SIZE, j++){
+	      //         for (int k = 0; k < BLOCK_SIZE, k++){
+			//               A[j + (k + i*BLOCK_SIZE)] = 1;
+			// 	            B[j + (k + i*BLOCK_SIZE)] = 1;
+	      //         }
+         //      }
+	      //     }
+        	  for(int i = 0; i < (MATRIX_SIZE*MATRIX_SIZE); i++) {
+        		  A[i] = FLOAT_TO_FIXED(0.5);
+        	  }
+					  write_buf[p] |= A[i];
+					  write_buf[p] = write_buf[p] << 8;
+					  write_buf[p] |= A[i+1];
+					  write_buf[p] = write_buf[p] << 8;
+					  write_buf[p] |= A[i+2];
+					  write_buf[p] = write_buf[p] << 8;
+					  write_buf[p] |= A[i+3];
+          }
+          for(p ; p< MEM_DEPTH; p++){
+             write_buf[p] = 0;
+             for(int i = 0; i < (MATRIX_SIZE*MATRIX_SIZE); i++) {
+			  B[i] = FLOAT_TO_FIXED(0.5);
+		  }
+
+			 write_buf[p] |= B[i]; write_buf[p] = write_buf[p] << 8;
+			 write_buf[p] |= B[i+1]; write_buf[p] = write_buf[p] << 8;
+			 write_buf[p] |= B[i+2]; write_buf[p] = write_buf[p] << 8;
+			 write_buf[p] |= B[i+3];
+          }
+          printf("Success Input gen \n");
+       } else if(case_num == SW_RUN){
+          XTime_GetTime(&tStart);
+          unsigned char A[MATRIX_SIZE][MATRIX_SIZE]; // 8b
+				  unsigned char B[MATRIX_SIZE][MATRIX_SIZE]; // 8b
+				  unsigned short C[MATRIX_SIZE][MATRIX_SIZE]; // 16b 결과 행렬
+          for (i = 0; i < MATRIX_SIZE; i++) {
+              for (j = 0; j < MATRIX_SIZE; j++) {
+                  A[i][j] = FLOAT_TO_FIXED(0.5); // 0~255 8b
+                  B[i][j] = FLOAT_TO_FIXED(0.5); // 0~255 8b
+              }
+          }
+
+          // 행렬 곱셈 수행
+          for (i = 0; i < MATRIX_SIZE; i++) {
+              for (j = 0; j < MATRIX_SIZE; j++) {
+                  C[i][j] = 0;
+                  for (k = 0; k < MATRIX_SIZE; k++) {
+                      C[i][j] += FIXED_MULT(A[i][k], B[k][j]);
+
+                  }
+              }
+          }
+
+          for(i = 0; i < MATRIX_SIZE; i ++) {
+	          for(j = 0; j < MATRIX_SIZE; j ++) {
+		          sw_result_buf[i * MATRIX_SIZE + j] = C[i][j];
+		          }
+		      }
+          XTime_GetTime(&tEnd);
+
+          printf("SW Done\n");
+          printf("Output took %llu clock cycles.\n", 2*(tEnd - tStart));
+          printf("Output took %.2f us.\n",
+                 1.0 * (tEnd - tStart) / (COUNTS_PER_SECOND/1000000));
+       } else if(case_num == HW_RUN){
+          printf("%d\n", sw_result_buf[1]);
+          int data = MEM_DEPTH; // SW Bug Fix 2
+          double hw_processing_time =0.0;
+          XTime_GetTime(&tStart);
+          Xil_Out32((XPAR_LAB16_MATBI_0_BASEADDR) + (CTRL_REG*AXI_DATA_BYTE), (u32)(0)); // init core ctrl reg
+          // Data Loading to BRAM 0
+          Xil_Out32((XPAR_LAB16_MATBI_0_BASEADDR) + (MEM0_ADDR_REG*AXI_DATA_BYTE), (u32)(0x00000000)); // Clear Added!!!
+          for(i=0; i< MEM_DEPTH ; i++){
+             Xil_Out32((XPAR_LAB16_MATBI_0_BASEADDR) + (MEM0_DATA_REG*AXI_DATA_BYTE), write_buf[i]); // Clear
+          }
+          XTime_GetTime(&tEnd);
+          printf("BRAM 0 Write Done\n");
+          printf("Output took %llu clock cycles.\n", 2*(tEnd - tStart));
+          printf("Output took %.2f us.\n",
+                 1.0 * (tEnd - tStart) / (COUNTS_PER_SECOND/1000000));
+          hw_processing_time += 1.0 * (tEnd - tStart) / (COUNTS_PER_SECOND/1000000);
+
+          // Cal
+          XTime_GetTime(&tStart);
+          // check IDLE
+          do{
+             read_data = Xil_In32((XPAR_LAB16_MATBI_0_BASEADDR) + (STATUS_REG*AXI_DATA_BYTE));
+          } while( (read_data & IDLE) != IDLE);
+          Xil_Out32((XPAR_LAB16_MATBI_0_BASEADDR) + (CTRL_REG*AXI_DATA_BYTE), (u32)(data | 0x80000000)); // MSB run
+          // wait done
+          do{
+             read_data = Xil_In32((XPAR_LAB16_MATBI_0_BASEADDR) + (STATUS_REG*AXI_DATA_BYTE));
+          } while( (read_data & DONE) != DONE );
+          XTime_GetTime(&tEnd);
+          printf("Calculation Core Done\n");
+          printf("Output took %llu clock cycles.\n", 2*(tEnd - tStart));
+          printf("Output took %.2f us.\n",
+                 1.0 * (tEnd - tStart) / (COUNTS_PER_SECOND/1000000));
+          hw_processing_time += 1.0 * (tEnd - tStart) / (COUNTS_PER_SECOND/1000000);
+
+          // Write Buffer from bram1
+          XTime_GetTime(&tStart);
+          Xil_Out32((XPAR_LAB16_MATBI_0_BASEADDR) + (MEM1_ADDR_REG*AXI_DATA_BYTE), (u32)(0x00000000)); // Clear
+         for(i=0; i< (MATRIX_SIZE*MATRIX_SIZE)/2 ; i++){
+            x = Xil_In32((XPAR_LAB16_MATBI_0_BASEADDR) + (MEM1_DATA_REG*AXI_DATA_BYTE));
+            lower = x & 0xFFFF;
+            hw_result_buf[2*i] = lower;
+            x = x >> 16;
+            hw_result_buf[2*i+1] = x;
+         }
+         XTime_GetTime(&tEnd);
+          printf("LAB16_MATBI_0 BRAM 1 Read Done\n");
+          printf("Output took %llu clock cycles.\n", 2*(tEnd - tStart));
+          printf("Output took %.2f us.\n",
+                 1.0 * (tEnd - tStart) / (COUNTS_PER_SECOND/1000000));
+          hw_processing_time += 1.0 * (tEnd - tStart) / (COUNTS_PER_SECOND/1000000);
+          printf("Total HW Run time %.2f us.\n",hw_processing_time);
+       } else if(case_num == CHECK){
+//         for(i=0; i< MEM_DEPTH ; i++){
+//            if(sw_result_buf[i] != hw_result_buf[i]){  // Check Result
+//               printf("Matbi!! Mismatch!! plz contact me. idx : %d, sw_result_buf : %u, hw_result_buf : %u\n", i, sw_result_buf[i], hw_result_buf[i]);
+//            }
+//         }
+             for(i=0; i< (MATRIX_SIZE*MATRIX_SIZE)/2 ; i++){
+               printf("idx : %f, sw_result_buf : %f, hw_result_buf : %d\n", i, FIXED_TO_FLOAT(sw_result_buf[i]), FIXED_TO_FLOAT(hw_result_buf[i]));
+
+            }
+         printf("Success. Match Result\n");
+       } else {
+          printf("end");
+          break;
+          // no operation, exit
+          //break;
+       }
+    }
+    free(write_buf);
+    free(sw_result_buf);
+    free(hw_result_buf);
+    return 0;
+}
